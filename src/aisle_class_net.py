@@ -26,4 +26,20 @@ from yaml import load
 class Net(nn.Module):
     def __init__(self, n_channnel, n_out):
         super().__init__()
-        self.conv1 = nn.Conv2d(3, )
+        self.conv1 = nn.Conv2d(n_channnel, 32, kernel_size=8, stride=4)
+        self.conv2 = nn.Conv2d(32, 32, kernel_size=3, stride=2)
+        self.relu = nn.ReLU(inplace=True)
+        self.flatten = nn.Flattern()
+        # self.l1 = nn.Linear()
+
+        self.features = nn.Sequential(
+            self.conv1,
+            self.relu,
+            self.conv2,
+            self.relu
+        )
+
+        def forward(self, x):
+            x1 = self.features(x)
+            x2 = self.flatten(x1)
+            return x2
