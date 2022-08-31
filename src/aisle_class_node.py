@@ -1,0 +1,215 @@
+#!/usr/bin/env python3
+from __future__ import print_function
+from nav_msgs.msg import Odometry
+import tf
+import sys
+import copy
+import time
+import os
+import csv
+from std_srvs.srv import SetBool, SetBoolResponse
+from std_srvs.srv import Empty
+from geometry_msgs.msg import PoseWithCovarianceStamped
+from std_msgs.msg import Int8MultiArray
+from nav_msgs.msg import Path
+from std_srvs.srv import Trigger
+from std_msgs.msg import Int8
+from geometry_msgs.msg import PoseArray
+from geometry_msgs.msg import Twist
+from skimage.transform import resize
+from aisle_class_net import *
+from cv_bridge import CvBridge, CvBridgeError
+from sensor_msgs.msg import Image
+import cv2
+import rospy
+import roslib
+# roslib.load_manifest('nav_cloning')
+
+
+class aisle_class_node:
+    def __init__(self):
+        rospy.init_node('aisle_class_node', anonymous=True)
+        self.action_num = 3
+        self.dl = deep_learning(n_out=self.action_num)
+        self.bridge = CvBridge()
+        self.image_sub = rospy.Subscriber(
+            "/camera/rgb/image_raw", Image, self.callback)
+        self.image_left_sub = rospy.Subscriber(
+            "/camera_left/rgb/image_raw", Image, self.callback_left_camera)
+        self.image_right_sub = rospy.Subscriber(
+            "/camera_right/rgb/image_raw", Image, self.callback_right_camera)
+        self.cmd_dir_sub = rospy.Subscriber(
+            "/cmd_dir", Int8MultiArray, self.callback_cmd, queue_size=1)
+        self.episode = 0
+        self.cv_image = np.zeros((480, 640, 3), np.uint8)
+        self.cv_left_image = np.zeros((480, 640, 3), np.uint8)
+        self.cv_right_image = np.zeros((480, 640, 3), np.uint8)
+        self.learning = True
+        self.select_dl = False
+        self.start_time = time.strftime("%Y%m%d_%H:%M:%S")
+        # self.path = roslib.packages.get_pkg_dir(
+        #     'nav_cloning') + '/data/result_with_dir_'+str(self.mode)+'/'
+        # self.save_path = roslib.packages.get_pkg_dir(
+        #     'nav_cloning') + '/data/model_with_dir_'+str(self.mode)+'/'
+        # self.load_path = roslib.packages.get_pkg_dir(
+        #     'nav_cloning') + '/data/model_with_dir_'+str(self.mode)+'/3com_6000step_selected/model.net'
+        self.previous_reset_time = 0
+        self.pos_x = 0.0
+        self.pos_y = 0.0
+        self.pos_the = 0.0
+        self.is_started = False
+        self.aisle_class = (1, 0, 0)
+        self.start_time_s = rospy.get_time()
+        # os.makedirs(self.path + self.start_time)
+
+        # with open(self.path + self.start_time + '/' + 'training.csv', 'w') as f:
+        #     writer = csv.writer(f, lineterminator='\n')
+        #     writer.writerow(['step', 'mode', 'loss', 'angle_error(rad)',
+        #                     'distance(m)', 'x(m)', 'y(m)', 'the(rad)', 'direction'])
+        # self.tracker_sub = rospy.Subscriber(
+        #     "/tracker", Odometry, self.callback_tracker)
+
+    def callback(self, data):
+        try:
+            self.cv_image = self.bridge.imgmsg_to_cv2(data, "bgr8")
+        except CvBridgeError as e:
+            print(e)
+
+    def callback_left_camera(self, data):
+        try:
+            self.cv_left_image = self.bridge.imgmsg_to_cv2(data, "bgr8")
+        except CvBridgeError as e:
+            print(e)
+
+    def callback_right_camera(self, data):
+        try:
+            self.cv_right_image = self.bridge.imgmsg_to_cv2(data, "bgr8")
+        except CvBridgeError as e:
+            print(e)
+
+    def callback_tracker(self, data):
+        self.pos_x = data.pose.pose.position.x
+        self.pos_y = data.pose.pose.position.y
+        rot = data.pose.pose.orientation
+        angle = tf.transformations.euler_from_quaternion(
+            (rot.x, rot.y, rot.z, rot.w))
+        self.pos_the = angle[2]
+
+    def callback_path(self, data):
+        self.path_pose = data
+
+    def callback_pose(self, data):
+        distance_list = []
+        pos = data.pose.pose.position
+        for pose in self.path_pose.poses:
+            path = pose.pose.position
+            distance = np.sqrt(abs((pos.x - path.x)**2 + (pos.y - path.y)**2))
+            distance_list.append(distance)
+
+        if distance_list:
+            self.min_distance = min(distance_list)
+
+    def callback_cmd(self, data):
+        self.aisle_class = data.data
+
+    def callback_vel(self, data):
+        self.vel = data
+        self.action = self.vel.angular.z
+
+    def callback_dl_training(self, data):
+        resp = SetBoolResponse()
+        self.learning = data.data
+        resp.message = "Training: " + str(self.learning)
+        resp.success = True
+        return resp
+
+    def loop(self):
+        if self.cv_image.size != 640 * 480 * 3:
+            return
+        if self.cv_left_image.size != 640 * 480 * 3:
+            return
+        if self.cv_right_image.size != 640 * 480 * 3:
+            return
+        img = resize(self.cv_image, (128, 128), mode='constant')
+        r, g, b = cv2.split(img)
+        imgobj = np.asanyarray([r, g, b])
+
+        img_left = resize(self.cv_left_image, (128, 128), mode='constant')
+        r, g, b = cv2.split(img_left)
+        imgobj_left = np.asanyarray([r, g, b])
+
+        img_right = resize(self.cv_right_image, (128, 128), mode='constant')
+        r, g, b = cv2.split(img_right)
+        imgobj_right = np.asanyarray([r, g, b])
+        cmd_dir = np.asanyarray(self.aisle_class)
+        ros_time = str(rospy.Time.now())
+
+        # if self.episode == 0:
+        #     self.learning = False
+        #     self.dl.save(self.save_path)
+        #     self.dl.load(self.load_path)
+
+        if self.episode == 6000:
+            self.learning = False
+            self.dl.save(self.save_path)
+            # self.dl.load(self.load_path)
+
+        if self.episode == 12000:
+            os.system('killall roslaunch')
+            sys.exit()
+
+        if self.learning:
+            # target_action = self.action
+            # distance = self.min_distance
+
+            class_, loss = self.dl.detect_and_trains(img, self.aisle_class)
+            # class_, loss_r = self.de.detect_and_train(img_right, self.aisle_class)
+            # class_, loss_l = self.de.detect_and_train(img_left, self.aisle_class)
+
+            # end mode
+
+            # print(str(self.episode) + ", training, loss: " + str(loss) + ", aisle_class: " +
+            #       str(self.aisle_class) + ", training_aisle_class: " + str(class_))
+            self.episode += 1
+            # line = [str(self.episode), "training", str(loss), str(angle_error), str(
+            #     distance), str(self.pos_x), str(self.pos_y), str(self.pos_the), str(cmd_dir)]
+            # with open(self.path + self.start_time + '/' + 'training.csv', 'a') as f:
+            #     writer = csv.writer(f, lineterminator='\n')
+            #     writer.writerow(line)
+            # self.vel.linear.x = 0.2
+            # self.vel.angular.z = target_action
+            # self.nav_pub.publish(self.vel)
+
+        else:
+            target_action = self.dl.act(imgobj, cmd_dir)
+            distance = self.min_distance
+            print(str(self.episode) + ", test, angular:" + str(target_action) +
+                  ", distance: " + str(distance) + ", cmd_dir: " + str(cmd_dir))
+
+            self.episode += 1
+            angle_error = abs(self.action - target_action)
+            line = [str(self.episode), "test", "0", str(angle_error), str(distance), str(
+                self.pos_x), str(self.pos_y), str(self.pos_the), str(cmd_dir)]
+            with open(self.path + self.start_time + '/' + 'training.csv', 'a') as f:
+                writer = csv.writer(f, lineterminator='\n')
+                writer.writerow(line)
+            self.vel.linear.x = 0.2
+            self.vel.angular.z = target_action
+            self.nav_pub.publish(self.vel)
+
+        temp = copy.deepcopy(img)
+        cv2.imshow("Resized Image", temp)
+        temp = copy.deepcopy(img_left)
+        cv2.imshow("Resized Left Image", temp)
+        temp = copy.deepcopy(img_right)
+        cv2.imshow("Resized Right Image", temp)
+        cv2.waitKey(1)
+
+
+if __name__ == '__main__':
+    rg = aisle_class_node()
+    DURATION = 0.25
+    r = rospy.Rate(1 / DURATION)
+    while not rospy.is_shutdown():
+        rg.loop()
+        r.sleep()
