@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 from __future__ import print_function
+from xmlrpc.client import FastParser
 from nav_msgs.msg import Odometry
 import tf
 import sys
@@ -25,6 +26,8 @@ import rospy
 import roslib
 # roslib.load_manifest('nav_cloning')
 
+#(直進, 角, 三叉路)
+
 
 class aisle_class_node:
     def __init__(self):
@@ -40,6 +43,8 @@ class aisle_class_node:
             "/camera_right/rgb/image_raw", Image, self.callback_right_camera)
         self.cmd_dir_sub = rospy.Subscriber(
             "/cmd_dir", Int8MultiArray, self.callback_cmd, queue_size=1)
+        self.pose_sub = rospy.Subscriber(
+            "/amcl_pose", PoseWithCovarianceStamped, self.callback_pose)
         self.episode = 0
         self.cv_image = np.zeros((480, 640, 3), np.uint8)
         self.cv_left_image = np.zeros((480, 640, 3), np.uint8)
@@ -53,6 +58,10 @@ class aisle_class_node:
         #     'nav_cloning') + '/data/model_with_dir_'+str(self.mode)+'/'
         # self.load_path = roslib.packages.get_pkg_dir(
         #     'nav_cloning') + '/data/model_with_dir_'+str(self.mode)+'/3com_6000step_selected/model.net'
+        self.save_path = roslib.packages.get_pkg_dir(
+            'aisle_classification') + '/data/models/'
+        self.load_path = roslib.packages.get_pkg_dir(
+            'aisle_classification') + '/data/models/20220905_20:03:00/model_gpu.pt'
         self.previous_reset_time = 0
         self.pos_x = 0.0
         self.pos_y = 0.0
@@ -60,6 +69,20 @@ class aisle_class_node:
         self.is_started = False
         self.aisle_class = (1, 0, 0)
         self.start_time_s = rospy.get_time()
+        self.pos_aisle_x = 0
+        self.pos_aisle_y = 0
+        self.aisle_flag_corner = False
+        self.aisle_flag_sansaro = False
+        self.aisle_pose_corner = np.array([
+            [[-11, -6.5], [-7.3, -1.4]],
+            [[-3.6, -6.6], [0.7, -1.1]],
+            [[-10, 27], [-6.7, 31]],
+            [[-2.3, 27], [1.4, 30]]
+        ])
+        self.aisle_pose_sansaro = np.array([
+            [[-11.3, 4.2], [-6.8, 11]],
+            [[-3.5, 5.1], [0.85, 11.1]]
+        ])
         # os.makedirs(self.path + self.start_time)
 
         # with open(self.path + self.start_time + '/' + 'training.csv', 'w') as f:
@@ -101,16 +124,23 @@ class aisle_class_node:
     def callback_pose(self, data):
         distance_list = []
         pos = data.pose.pose.position
-        for pose in self.path_pose.poses:
-            path = pose.pose.position
-            distance = np.sqrt(abs((pos.x - path.x)**2 + (pos.y - path.y)**2))
-            distance_list.append(distance)
+        self.pos_aisle_x = data.pose.pose.position.x
+        self.pos_aisle_y = data.pose.pose.position.y
 
-        if distance_list:
-            self.min_distance = min(distance_list)
+        if self.episode >= 1:
+            self.check_area()
+
+        # for pose in self.path_pose.poses:
+        #     path = pose.pose.position
+        #     distance = np.sqrt(abs((pos.x - path.x)**2 + (pos.y - path.y)**2))
+        #     distance_list.append(distance)
+
+        # if distance_list:
+        #     self.min_distance = min(distance_list)
 
     def callback_cmd(self, data):
-        self.aisle_class = data.data
+        # self.aisle_class = data.data
+        pass
 
     def callback_vel(self, data):
         self.vel = data
@@ -122,6 +152,26 @@ class aisle_class_node:
         resp.message = "Training: " + str(self.learning)
         resp.success = True
         return resp
+
+    def check_area(self):
+        for i, ((x1, y1), (x2, y2)) in enumerate(self.aisle_pose_corner):
+            if (x1 <= self.pos_aisle_x <= x2) and (y1 <= self.pos_aisle_y <= y2):
+                self.aisle_flag_corner = True
+                self.aisle_class = (0, 1, 0)
+                print("角")
+
+        for i, ((x1, y1), (x2, y2)) in enumerate(self.aisle_pose_sansaro):
+            if (x1 <= self.pos_aisle_x <= x2) and (y1 <= self.pos_aisle_y <= y2):
+                self.aisle_flag_sansaro = True
+                self.aisle_class = (0, 0, 1)
+                print("三叉路")
+
+        if (not self.aisle_flag_corner) and (not self.aisle_flag_sansaro):
+            self.aisle_class = (1, 0, 0)
+            print("道なり")
+
+        self.aisle_flag_corner = False
+        self.aisle_flag_sansaro = False
 
     def loop(self):
         if self.cv_image.size != 640 * 480 * 3:
@@ -146,10 +196,9 @@ class aisle_class_node:
 
         # if self.episode == 0:
         #     self.learning = False
-        #     self.dl.save(self.save_path)
         #     self.dl.load(self.load_path)
 
-        if self.episode == 6000:
+        if self.episode == 8000:
             self.learning = False
             self.dl.save(self.save_path)
             # self.dl.load(self.load_path)
@@ -162,7 +211,9 @@ class aisle_class_node:
             # target_action = self.action
             # distance = self.min_distance
 
-            class_, loss = self.dl.detect_and_trains(img, self.aisle_class)
+            class_, class_1, class_2, loss = self.dl.detect_and_trains(
+                img, self.aisle_class)
+            print(self.episode, class_, class_1, class_2)
             # class_, loss_r = self.de.detect_and_train(img_right, self.aisle_class)
             # class_, loss_l = self.de.detect_and_train(img_left, self.aisle_class)
 
@@ -181,28 +232,31 @@ class aisle_class_node:
             # self.nav_pub.publish(self.vel)
 
         else:
-            target_action = self.dl.act(imgobj, cmd_dir)
-            distance = self.min_distance
-            print(str(self.episode) + ", test, angular:" + str(target_action) +
-                  ", distance: " + str(distance) + ", cmd_dir: " + str(cmd_dir))
+            class_ = self.dl.detect(img)
+            # print(class_)
+            max_index = class_[0].index(max(class_[0]))
+
+            # distance = self.min_distance
+            print(str(self.episode) + ", test, class:" +
+                  str(max_index) + ", currnt_class: " + str(cmd_dir))
 
             self.episode += 1
-            angle_error = abs(self.action - target_action)
-            line = [str(self.episode), "test", "0", str(angle_error), str(distance), str(
-                self.pos_x), str(self.pos_y), str(self.pos_the), str(cmd_dir)]
-            with open(self.path + self.start_time + '/' + 'training.csv', 'a') as f:
-                writer = csv.writer(f, lineterminator='\n')
-                writer.writerow(line)
-            self.vel.linear.x = 0.2
-            self.vel.angular.z = target_action
-            self.nav_pub.publish(self.vel)
+            # angle_error = abs(self.action - target_action)
+            # line = [str(self.episode), "test", "0", str(angle_error), str(distance), str(
+            #     self.pos_x), str(self.pos_y), str(self.pos_the), str(cmd_dir)]
+            # with open(self.path + self.start_time + '/' + 'training.csv', 'a') as f:
+            #     writer = csv.writer(f, lineterminator='\n')
+            #     writer.writerow(line)
+            # self.vel.linear.x = 0.2
+            # self.vel.angular.z = target_action
+            # self.nav_pub.publish(self.vel)
 
         temp = copy.deepcopy(img)
         cv2.imshow("Resized Image", temp)
-        temp = copy.deepcopy(img_left)
-        cv2.imshow("Resized Left Image", temp)
-        temp = copy.deepcopy(img_right)
-        cv2.imshow("Resized Right Image", temp)
+        # temp = copy.deepcopy(img_left)
+        # cv2.imshow("Resized Left Image", temp)
+        # temp = copy.deepcopy(img_right)
+        # cv2.imshow("Resized Right Image", temp)
         cv2.waitKey(1)
 
 

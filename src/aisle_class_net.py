@@ -135,8 +135,8 @@ class deep_learning:
         self.count += 1
 
         action_value_training = self.net(x)
-        print(action_value_training)
-        print(torch.argmax(action_value_training))
+        # print(action_value_training)
+        # print(torch.argmax(action_value_training))
 
         if self.x_cat.size()[0] > MAX_DATA:
             self.x_cat = torch.empty(1, 3, 128, 128).to(self.device)
@@ -144,7 +144,7 @@ class deep_learning:
             self.first_flag = True
             print("reset dataset")
 
-        return action_value_training[0][0].item(), loss.item()
+        return action_value_training[0][0].item(), action_value_training[0][1].item(), action_value_training[0][2].item(), loss.item()
 
     def detect(self, img):
         self.net.eval()
@@ -152,7 +152,7 @@ class deep_learning:
             img, dtype=torch.float32, device=self.device).unsqueeze(0)
         x_test_ten = x_test_ten.permute(0, 3, 1, 2)
         action_value_test = self.net(x_test_ten)
-        return action_value_test.item()
+        return action_value_test.tolist()
 
     def test(self):
         input = torch.randn(1, 3, 128, 128).to(self.device)
@@ -160,6 +160,14 @@ class deep_learning:
         # print(self.net.x1.shape)
         # print(self.net.x2.shape)
         # print(self.net.x3.shape)
+
+    def save(self, save_path):
+        path = save_path + time.strftime("%Y%m%d_%H:%M:%S")
+        os.makedirs(path)
+        torch.save(self.net.state_dict(), path + '/model_gpu.pt')
+
+    def load(self, load_path):
+        self.net.state_dict(torch.load(load_path))
 
 
 if __name__ == '__main__':
