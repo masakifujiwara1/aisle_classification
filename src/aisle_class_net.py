@@ -25,7 +25,7 @@ from yaml import load
 
 # input 64
 
-INPUT = 128  # 64
+INPUT = 64  # 64
 BATCH_SIZE = 16  # 16
 MAX_DATA = 10000
 

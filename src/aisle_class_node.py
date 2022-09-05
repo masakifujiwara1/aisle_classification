@@ -27,7 +27,7 @@ import roslib
 # roslib.load_manifest('nav_cloning')
 
 #(直進, 角, 三叉路)
-INPUT = 128  # 64
+INPUT = 64  # 64
 
 
 class aisle_class_node:
@@ -62,7 +62,7 @@ class aisle_class_node:
         self.save_path = roslib.packages.get_pkg_dir(
             'aisle_classification') + '/data/models/'
         self.load_path = roslib.packages.get_pkg_dir(
-            'aisle_classification') + '/data/models/4000step_input128/model_gpu.pt'
+            'aisle_classification') + '/data/models/8000step_input64/model_gpu.pt'
         self.previous_reset_time = 0
         self.pos_x = 0.0
         self.pos_y = 0.0
@@ -72,6 +72,8 @@ class aisle_class_node:
         self.start_time_s = rospy.get_time()
         self.pos_aisle_x = 0
         self.pos_aisle_y = 0
+        self.correct_count = 0
+        self.aisle_status = '道なり'
         self.aisle_flag_corner = False
         self.aisle_flag_sansaro = False
         self.aisle_pose_corner = np.array([
@@ -159,17 +161,20 @@ class aisle_class_node:
             if (x1 <= self.pos_aisle_x <= x2) and (y1 <= self.pos_aisle_y <= y2):
                 self.aisle_flag_corner = True
                 self.aisle_class = (0, 1, 0)
-                print("角")
+                # print("角")
+                self.aisle_status = "角"
 
         for i, ((x1, y1), (x2, y2)) in enumerate(self.aisle_pose_sansaro):
             if (x1 <= self.pos_aisle_x <= x2) and (y1 <= self.pos_aisle_y <= y2):
                 self.aisle_flag_sansaro = True
                 self.aisle_class = (0, 0, 1)
-                print("三叉路")
+                # print("三叉路")
+                self.aisle_status = "三叉路"
 
         if (not self.aisle_flag_corner) and (not self.aisle_flag_sansaro):
             self.aisle_class = (1, 0, 0)
-            print("道なり")
+            # print("道なり")
+            self.aisle_status = "道なり"
 
         self.aisle_flag_corner = False
         self.aisle_flag_sansaro = False
@@ -241,9 +246,25 @@ class aisle_class_node:
             # print(class_)
             max_index = class_[0].index(max(class_[0]))
 
+            if max_index == 0:
+                dict_class = "道なり"
+            elif max_index == 1:
+                dict_class = "角"
+            else:
+                dict_class = "三叉路"
+
+            if dict_class == self.aisle_status:
+                self.correct_count += 1
+
+            per_ = self.correct_count/(self.episode + 1e-4) * 100
+            if per_ > 100:
+                per_ = 100
+
             # distance = self.min_distance
-            print(str(self.episode) + ", test, class:" +
-                  str(max_index) + ", currnt_class: " + str(cmd_dir) + 'actually_class:' + str(class_))
+            # print(str(self.episode) + ", test, class:" +
+            #       str(max_index) + ", currnt_class: " + str(cmd_dir) + 'actually_class:' + str(class_))
+            print(str(self.episode) + ", test, dict_class:" +
+                  str(dict_class) + ", correct_class: " + self.aisle_status + ", acc_per: " + str(per_))
 
             self.episode += 1
             # angle_error = abs(self.action - target_action)
