@@ -27,6 +27,7 @@ import roslib
 # roslib.load_manifest('nav_cloning')
 
 #(直進, 角, 三叉路)
+INPUT = 128  # 64
 
 
 class aisle_class_node:
@@ -61,7 +62,7 @@ class aisle_class_node:
         self.save_path = roslib.packages.get_pkg_dir(
             'aisle_classification') + '/data/models/'
         self.load_path = roslib.packages.get_pkg_dir(
-            'aisle_classification') + '/data/models/20220905_20:03:00/model_gpu.pt'
+            'aisle_classification') + '/data/models/4000step_input128/model_gpu.pt'
         self.previous_reset_time = 0
         self.pos_x = 0.0
         self.pos_y = 0.0
@@ -180,7 +181,7 @@ class aisle_class_node:
             return
         if self.cv_right_image.size != 640 * 480 * 3:
             return
-        img = resize(self.cv_image, (128, 128), mode='constant')
+        img = resize(self.cv_image, (INPUT, INPUT), mode='constant')
         r, g, b = cv2.split(img)
         imgobj = np.asanyarray([r, g, b])
 
@@ -194,14 +195,18 @@ class aisle_class_node:
         cmd_dir = np.asanyarray(self.aisle_class)
         ros_time = str(rospy.Time.now())
 
-        # if self.episode == 0:
-        #     self.learning = False
-        #     self.dl.load(self.load_path)
+        if self.episode == 0:
+            self.learning = False
+            self.dl.load(self.load_path)
 
         if self.episode == 8000:
             self.learning = False
             self.dl.save(self.save_path)
             # self.dl.load(self.load_path)
+
+            # not test mode
+            os.system('killall roslaunch')
+            sys.exit()
 
         if self.episode == 12000:
             os.system('killall roslaunch')
@@ -238,7 +243,7 @@ class aisle_class_node:
 
             # distance = self.min_distance
             print(str(self.episode) + ", test, class:" +
-                  str(max_index) + ", currnt_class: " + str(cmd_dir))
+                  str(max_index) + ", currnt_class: " + str(cmd_dir) + 'actually_class:' + str(class_))
 
             self.episode += 1
             # angle_error = abs(self.action - target_action)

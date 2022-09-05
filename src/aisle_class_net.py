@@ -23,10 +23,13 @@ from torch.utils.tensorboard import SummaryWriter
 import torch.nn.functional as F
 from yaml import load
 
-# input 128
+# input 64
 
-BATCH_SIZE = 16
+INPUT = 128  # 64
+BATCH_SIZE = 16  # 16
 MAX_DATA = 10000
+
+INPUT_ = int(INPUT/4)
 
 
 class Net(nn.Module):
@@ -44,7 +47,7 @@ class Net(nn.Module):
         torch.nn.init.kaiming_normal_(self.conv2.weight)
         torch.nn.init.kaiming_normal_(self.conv3.weight)
 
-        self.classifier = nn.Linear(1024*32, 3)
+        self.classifier = nn.Linear(32*(INPUT_)**2, 3)
         torch.nn.init.kaiming_normal_(self.classifier.weight)
 
         # self.softmax = F.softmax()
@@ -167,7 +170,7 @@ class deep_learning:
         torch.save(self.net.state_dict(), path + '/model_gpu.pt')
 
     def load(self, load_path):
-        self.net.state_dict(torch.load(load_path))
+        self.net.load_state_dict(torch.load(load_path))
 
 
 if __name__ == '__main__':
