@@ -28,6 +28,9 @@ import roslib
 
 #(直進, 角, 三叉路)
 INPUT = 64  # 64
+COOL_TIME = 120
+AISLE_DATA = 30
+MINIMUM_ELEMNTS = 20
 
 
 class aisle_class_node:
@@ -53,12 +56,6 @@ class aisle_class_node:
         self.learning = True
         self.select_dl = False
         self.start_time = time.strftime("%Y%m%d_%H:%M:%S")
-        # self.path = roslib.packages.get_pkg_dir(
-        #     'nav_cloning') + '/data/result_with_dir_'+str(self.mode)+'/'
-        # self.save_path = roslib.packages.get_pkg_dir(
-        #     'nav_cloning') + '/data/model_with_dir_'+str(self.mode)+'/'
-        # self.load_path = roslib.packages.get_pkg_dir(
-        #     'nav_cloning') + '/data/model_with_dir_'+str(self.mode)+'/3com_6000step_selected/model.net'
         self.save_path = roslib.packages.get_pkg_dir(
             'aisle_classification') + '/data/models/'
         self.load_path = roslib.packages.get_pkg_dir(
@@ -76,6 +73,8 @@ class aisle_class_node:
         self.aisle_status = '道なり'
         self.aisle_flag_corner = False
         self.aisle_flag_sansaro = False
+        self.aisle_cool_count = COOL_TIME
+        self.aisle_list = []
         self.aisle_pose_corner = np.array([
             [[-11, -6.5], [-7.3, -1.4]],
             [[-3.6, -6.6], [0.7, -1.1]],
@@ -86,14 +85,6 @@ class aisle_class_node:
             [[-11.3, 4.2], [-6.8, 11]],
             [[-3.5, 5.1], [0.85, 11.1]]
         ])
-        # os.makedirs(self.path + self.start_time)
-
-        # with open(self.path + self.start_time + '/' + 'training.csv', 'w') as f:
-        #     writer = csv.writer(f, lineterminator='\n')
-        #     writer.writerow(['step', 'mode', 'loss', 'angle_error(rad)',
-        #                     'distance(m)', 'x(m)', 'y(m)', 'the(rad)', 'direction'])
-        # self.tracker_sub = rospy.Subscriber(
-        #     "/tracker", Odometry, self.callback_tracker)
 
     def callback(self, data):
         try:
@@ -253,6 +244,22 @@ class aisle_class_node:
             else:
                 dict_class = "三叉路"
 
+            self.aisle_list.append(dict_class)
+
+            if len(self.aisle_list) > AISLE_DATA:
+                del self.aisle_list[0]
+
+            print(self.aisle_list.count('角'), self.aisle_list.count(
+                '三叉路'), self.aisle_cool_count)
+
+            if self.aisle_cool_count > COOL_TIME:
+                if self.aisle_list.count('角') > MINIMUM_ELEMNTS:
+                    print("detect 角")
+                    self.aisle_cool_count = 0
+                elif self.aisle_list.count('三叉路') > MINIMUM_ELEMNTS:
+                    print("detect 三叉路")
+                    self.aisle_cool_count = 0
+
             if dict_class == self.aisle_status:
                 self.correct_count += 1
 
@@ -267,6 +274,7 @@ class aisle_class_node:
                   str(dict_class) + ", correct_class: " + self.aisle_status + ", acc_per: " + str(per_))
 
             self.episode += 1
+            self.aisle_cool_count += 1
             # angle_error = abs(self.action - target_action)
             # line = [str(self.episode), "test", "0", str(angle_error), str(distance), str(
             #     self.pos_x), str(self.pos_y), str(self.pos_the), str(cmd_dir)]
