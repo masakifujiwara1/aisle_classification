@@ -28,9 +28,9 @@ import roslib
 
 #(直進, 角, 三叉路)
 INPUT = 64  # 64
-COOL_TIME = 120
+COOL_TIME = 125
 AISLE_DATA = 30
-MINIMUM_ELEMNTS = 20
+MINIMUM_ELEMNTS = 25
 
 
 class aisle_class_node:
@@ -49,6 +49,9 @@ class aisle_class_node:
             "/cmd_dir", Int8MultiArray, self.callback_cmd, queue_size=1)
         self.pose_sub = rospy.Subscriber(
             "/amcl_pose", PoseWithCovarianceStamped, self.callback_pose)
+        self.aisle_class_pub = rospy.Publisher(
+            "detect_class", Int8MultiArray, queue_size=1)
+        self.detect_class = Int8MultiArray()
         self.episode = 0
         self.cv_image = np.zeros((480, 640, 3), np.uint8)
         self.cv_left_image = np.zeros((480, 640, 3), np.uint8)
@@ -255,9 +258,13 @@ class aisle_class_node:
             if self.aisle_cool_count > COOL_TIME:
                 if self.aisle_list.count('角') > MINIMUM_ELEMNTS:
                     print("detect 角")
+                    self.detect_class.data = (0, 1, 0)
+                    self.aisle_class_pub.publish(self.detect_class)
                     self.aisle_cool_count = 0
                 elif self.aisle_list.count('三叉路') > MINIMUM_ELEMNTS:
                     print("detect 三叉路")
+                    self.detect_class.data = (0, 0, 1)
+                    self.aisle_class_pub.publish(self.detect_class)
                     self.aisle_cool_count = 0
 
             if dict_class == self.aisle_status:
