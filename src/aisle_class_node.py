@@ -28,7 +28,7 @@ import roslib
 
 #(直進, 角, 三叉路)
 INPUT = 64  # 64
-COOL_TIME = 125
+COOL_TIME = 130
 AISLE_DATA = 30
 MINIMUM_ELEMNTS = 25
 
@@ -77,6 +77,7 @@ class aisle_class_node:
         self.aisle_flag_corner = False
         self.aisle_flag_sansaro = False
         self.aisle_cool_count = COOL_TIME
+        self.with_way_cool_count = COOL_TIME
         self.aisle_list = []
         self.aisle_pose_corner = np.array([
             [[-11, -6.5], [-7.3, -1.4]],
@@ -88,12 +89,17 @@ class aisle_class_node:
             [[-11.3, 4.2], [-6.8, 11]],
             [[-3.5, 5.1], [0.85, 11.1]]
         ])
+        self.start_srv = rospy.Service('/aisle_start', Trigger, self.callback_srv)
+        self.started = False
 
     def callback(self, data):
         try:
             self.cv_image = self.bridge.imgmsg_to_cv2(data, "bgr8")
         except CvBridgeError as e:
             print(e)
+    
+    def callback_srv(self, data):
+        self.started = True
 
     def callback_left_camera(self, data):
         try:
@@ -180,6 +186,10 @@ class aisle_class_node:
             return
         if self.cv_right_image.size != 640 * 480 * 3:
             return
+
+        if not self.started:
+            return
+
         img = resize(self.cv_image, (INPUT, INPUT), mode='constant')
         r, g, b = cv2.split(img)
         imgobj = np.asanyarray([r, g, b])
@@ -252,7 +262,7 @@ class aisle_class_node:
             if len(self.aisle_list) > AISLE_DATA:
                 del self.aisle_list[0]
 
-            print(self.aisle_list.count('角'), self.aisle_list.count(
+            print(self.aisle_list.count('道なり'), self.aisle_list.count('角'), self.aisle_list.count(
                 '三叉路'), self.aisle_cool_count)
 
             if self.aisle_cool_count > COOL_TIME:
@@ -266,6 +276,16 @@ class aisle_class_node:
                     self.detect_class.data = (0, 0, 1)
                     self.aisle_class_pub.publish(self.detect_class)
                     self.aisle_cool_count = 0
+                elif (self.aisle_list.count('道なり') > int(MINIMUM_ELEMNTS/2)) and self.with_way_cool_count > COOL_TIME:
+                    print("resume 道なり")
+                    self.detect_class.data = (1, 0, 0)
+                    self.aisle_class_pub.publish(self.detect_class)
+                    self.with_way_cool_count = 0
+            
+            if self.aisle_cool_count == 60:
+                self.detect_class.data = (1, 0, 0)
+                self.aisle_class_pub.publish(self.detect_class)
+                self.with_way_cool_count = 0
 
             if dict_class == self.aisle_status:
                 self.correct_count += 1
@@ -282,6 +302,7 @@ class aisle_class_node:
 
             self.episode += 1
             self.aisle_cool_count += 1
+            self.with_way_cool_count += 1
             # angle_error = abs(self.action - target_action)
             # line = [str(self.episode), "test", "0", str(angle_error), str(distance), str(
             #     self.pos_x), str(self.pos_y), str(self.pos_the), str(cmd_dir)]
