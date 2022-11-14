@@ -298,7 +298,7 @@ class aisle_class_node:
             # print(str(self.episode) + ", test, class:" +
             #       str(max_index) + ", currnt_class: " + str(cmd_dir) + 'actually_class:' + str(class_))
             print(str(self.episode) + ", test, dict_class:" +
-                  str(dict_class))
+                  str(dict_class) + ", correct_class: " + self.aisle_status + ", acc_per: " + str(per_))
 
             self.episode += 1
             self.aisle_cool_count += 1
